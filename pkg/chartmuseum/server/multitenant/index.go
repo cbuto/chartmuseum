@@ -63,20 +63,28 @@ func (server *MultiTenantServer) getIndexFile(log cm_logger.LoggingFn, repo stri
 				"repo", repo,
 			)
 		} else {
-			ir := <-server.regenerateRepositoryIndex(log, entry, diff)
-			if ir.err != nil {
-				errStr := ir.err.Error()
+			err := server.regenerateRepositoryIndexWorker(log, entry, diff)
+			if err != nil {
+				errStr := err.Error()
 				log(cm_logger.ErrorLevel, errStr,
 					"repo", repo,
 				)
-				return ir.index, &HTTPError{http.StatusInternalServerError, errStr}
+				return nil, &HTTPError{http.StatusInternalServerError, errStr}
 			}
-			entry.RepoIndex = ir.index
+			//ir := <-server.regenerateRepositoryIndex(log, entry, diff)
+			//if ir.err != nil {
+			//	errStr := ir.err.Error()
+			//	log(cm_logger.ErrorLevel, errStr,
+			//		"repo", repo,
+			//	)
+			//	return ir.index, &HTTPError{http.StatusInternalServerError, errStr}
+			//}
+			//entry.RepoIndex = ir.index
 
 			if server.UseStatefiles {
 				// Dont wait, save index-cache.yaml to storage in the background.
 				// It is not crucial if this does not succeed, we will just log any errors
-				go server.saveStatefile(log, repo, ir.index.Raw)
+				go server.saveStatefile(log, entry.RepoName, entry.RepoIndex.Raw)
 			}
 		}
 	}

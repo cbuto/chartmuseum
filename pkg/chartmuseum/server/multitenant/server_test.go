@@ -18,7 +18,9 @@ package multitenant
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"helm.sh/chartmuseum/pkg/cache"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
@@ -173,20 +175,20 @@ func (suite *MultiTenantServerTestSuite) SetupSuite() {
 	os.MkdirAll(suite.TempDirectory, os.ModePerm)
 	suite.copyTestFilesTo(suite.TempDirectory)
 
-	srcFileTarball, err := os.Open(testTarballPath)
-	suite.Nil(err, "no error opening test tarball")
-	defer srcFileTarball.Close()
-
-	suite.TestTarballFilename = pathutil.Join(suite.TempDirectory, "mychart-0.1.0.tgz")
-	destFileTarball, err := os.Create(suite.TestTarballFilename)
-	suite.Nil(err, "no error creating new tarball in temp dir")
-	defer destFileTarball.Close()
-
-	_, err = io.Copy(destFileTarball, srcFileTarball)
-	suite.Nil(err, "no error copying test testball to temp tarball")
-
-	err = destFileTarball.Sync()
-	suite.Nil(err, "no error syncing temp tarball")
+	//srcFileTarball, err := os.Open(testTarballPath)
+	//suite.Nil(err, "no error opening test tarball")
+	//defer srcFileTarball.Close()
+	//
+	//suite.TestTarballFilename = pathutil.Join(suite.TempDirectory, "mychart-0.1.0.tgz")
+	//destFileTarball, err := os.Create(suite.TestTarballFilename)
+	//suite.Nil(err, "no error creating new tarball in temp dir")
+	//defer destFileTarball.Close()
+	//
+	//_, err = io.Copy(destFileTarball, srcFileTarball)
+	//suite.Nil(err, "no error copying test testball to temp tarball")
+	//
+	//err = destFileTarball.Sync()
+	//suite.Nil(err, "no error syncing temp tarball")
 
 	suite.StorageDirectory = map[string]map[string][]string{
 		"org1": {
@@ -342,7 +344,7 @@ func (suite *MultiTenantServerTestSuite) SetupSuite() {
 		AllowOverwrite:         true,
 		ChartPostFormFieldName: "chart",
 		ProvPostFormFieldName:  "prov",
-		CacheInterval:          time.Duration(time.Second),
+		ExternalCacheStore:     cache.NewRedisStore("localhost:6379", "", 0),
 	})
 	suite.NotNil(server)
 	suite.Nil(err, "no error creating new overwrite server")
@@ -381,7 +383,6 @@ func (suite *MultiTenantServerTestSuite) SetupSuite() {
 		EnableAPI:              true,
 		AllowOverwrite:         true,
 		ChartPostFormFieldName: "chart",
-		CacheInterval:          time.Duration(time.Second),
 		PerChartLimit:          2,
 	})
 	suite.NotNil(server)
@@ -487,7 +488,7 @@ func (suite *MultiTenantServerTestSuite) regenerateRepositoryIndex(repo string, 
 	}
 	suite.Nil(err, "no error on fetchChartsInStorage")
 	diff := storage.GetObjectSliceDiff(server.getRepoObjectSlice(entry), objects, server.TimestampTolerance)
-	_, err = server.regenerateRepositoryIndexWorker(log, entry, diff)
+	err = server.regenerateRepositoryIndexWorker(log, entry, diff)
 	suite.Nil(err, "no error regenerating repo index")
 
 	newtime := time.Now().Add(1 * time.Hour)
@@ -497,7 +498,7 @@ func (suite *MultiTenantServerTestSuite) regenerateRepositoryIndex(repo string, 
 	objects, err = server.fetchChartsInStorage(log, repo)
 	suite.Nil(err, "no error on fetchChartsInStorage")
 	diff = storage.GetObjectSliceDiff(server.getRepoObjectSlice(entry), objects, server.TimestampTolerance)
-	_, err = server.regenerateRepositoryIndexWorker(log, entry, diff)
+	err = server.regenerateRepositoryIndexWorker(log, entry, diff)
 	suite.Nil(err, "no error regenerating repo index with tarball updated")
 
 	brokenTarballFilename := pathutil.Join(suite.TempDirectory, "brokenchart.tgz")
@@ -507,7 +508,7 @@ func (suite *MultiTenantServerTestSuite) regenerateRepositoryIndex(repo string, 
 	objects, err = server.fetchChartsInStorage(log, repo)
 	suite.Nil(err, "no error on fetchChartsInStorage")
 	diff = storage.GetObjectSliceDiff(server.getRepoObjectSlice(entry), objects, server.TimestampTolerance)
-	_, err = server.regenerateRepositoryIndexWorker(log, entry, diff)
+	err = server.regenerateRepositoryIndexWorker(log, entry, diff)
 	suite.Nil(err, "error not returned with broken tarball added")
 
 	err = os.Chtimes(brokenTarballFilename, newtime, newtime)
@@ -515,7 +516,7 @@ func (suite *MultiTenantServerTestSuite) regenerateRepositoryIndex(repo string, 
 	objects, err = server.fetchChartsInStorage(log, repo)
 	suite.Nil(err, "no error on fetchChartsInStorage")
 	diff = storage.GetObjectSliceDiff(server.getRepoObjectSlice(entry), objects, server.TimestampTolerance)
-	_, err = server.regenerateRepositoryIndexWorker(log, entry, diff)
+	err = server.regenerateRepositoryIndexWorker(log, entry, diff)
 	suite.Nil(err, "error not returned with broken tarball updated")
 
 	err = os.Remove(brokenTarballFilename)
@@ -523,7 +524,7 @@ func (suite *MultiTenantServerTestSuite) regenerateRepositoryIndex(repo string, 
 	objects, err = server.fetchChartsInStorage(log, repo)
 	suite.Nil(err, "no error on fetchChartsInStorage")
 	diff = storage.GetObjectSliceDiff(server.getRepoObjectSlice(entry), objects, server.TimestampTolerance)
-	_, err = server.regenerateRepositoryIndexWorker(log, entry, diff)
+	err = server.regenerateRepositoryIndexWorker(log, entry, diff)
 	suite.Nil(err, "error not returned with broken tarball removed")
 }
 
@@ -531,6 +532,58 @@ func (suite *MultiTenantServerTestSuite) TestRegenerateRepositoryIndex() {
 	suite.regenerateRepositoryIndex("", true)
 	suite.regenerateRepositoryIndex("org1", true)
 	suite.regenerateRepositoryIndex("not-set-org", false)
+}
+
+func (suite *MultiTenantServerTestSuite) TestDataRace() {
+	// start with a clean slate
+	suite.doRequest("overwrite", "DELETE", "/api/charts/mychart/0.1.0", nil, "")
+	suite.doRequest("overwrite", "DELETE", "/api/charts/mychart/0.2.0", nil, "")
+	suite.doRequest("overwrite", "DELETE", "/api/charts/mychart/0.0.1", nil, "")
+
+	content1, err := ioutil.ReadFile(testTarballPath)
+	suite.Nil(err, "no error opening test tarball")
+	body1 := bytes.NewBuffer(content1)
+
+	content2, err := ioutil.ReadFile(testTarballPathV2)
+	suite.Nil(err, "no error opening test tarball")
+	body2 := bytes.NewBuffer(content2)
+
+	content3, err := ioutil.ReadFile(testTarballPathV0)
+	suite.Nil(err, "no error opening test tarball")
+	body3 := bytes.NewBuffer(content3)
+
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "POST", "/api/charts", body1, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/api/charts/mychart/0.1.0", nil, "")
+	go suite.doRequest("overwrite", "POST", "/api/charts", body2, "")
+	go suite.doRequest("overwrite", "GET", "/api/charts/mychart/0.2.0", nil, "")
+
+	go suite.doRequest("overwrite", "POST", "/api/charts", body3, "")
+
+	go suite.doRequest("overwrite", "GET", "/api/charts/mychart/0.0.1", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+	go suite.doRequest("overwrite", "GET", "/index.yaml", nil, "")
+
+	time.Sleep(time.Minute)
+	suite.Eventually(func() bool {
+		e := suite.extractRepoEntryFromExternalCache("")
+		for _, v := range e.RepoIndex.Entries {
+			for _, v2 := range v {
+				fmt.Println(v2)
+			}
+		}
+		return len(e.RepoIndex.Entries["mychart"]) == 3
+	}, time.Duration(time.Minute), time.Duration(5*time.Second))
+
 }
 
 func (suite *MultiTenantServerTestSuite) TestGenIndex() {
@@ -657,6 +710,17 @@ func (suite *MultiTenantServerTestSuite) TestDisabledDeleteServer() {
 	suite.Equal(404, res.Status(), "404 DELETE /api/charts/mychart/0.1.0")
 }
 
+func (suite *MultiTenantServerTestSuite) extractRepoEntryFromExternalCache(repo string) *cacheEntry {
+	var entry *cacheEntry
+	content, err := suite.OverwriteServer.ExternalCacheStore.Get(repo)
+	if err != nil {
+		fmt.Println("test")
+		return nil
+	}
+	err = json.Unmarshal(content, &entry)
+	return entry
+}
+
 func (suite *MultiTenantServerTestSuite) extractRepoEntryFromInternalCache(repo string) *cacheEntry {
 	local, ok := suite.OverwriteServer.InternalCacheStore.Load(repo)
 	if ok {
@@ -680,7 +744,7 @@ func (suite *MultiTenantServerTestSuite) TestOverwriteServer() {
 		// waiting for the emit event
 		// the event is transferred via a channel , here do a simple wait for not changing the original structure
 		// only for testing purpose
-		time.Sleep(time.Second)
+		time.Sleep(time.Minute)
 		// depth: 0
 		e := suite.extractRepoEntryFromInternalCache("")
 		e.RepoLock.RLock()
