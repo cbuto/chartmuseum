@@ -4,12 +4,13 @@ go 1.17
 
 require (
 	github.com/alicebob/miniredis v2.5.0+incompatible
+	github.com/bsm/redislock v0.7.2
 	github.com/chartmuseum/auth v0.5.0
 	github.com/chartmuseum/storage v0.12.4
 	github.com/ghodss/yaml v1.0.0
 	github.com/gin-contrib/size v0.0.0-20220102055520-f75bacbc2df3
 	github.com/gin-gonic/gin v1.8.0
-	github.com/go-redis/redis v6.15.9+incompatible
+	github.com/go-redis/redis/v8 v8.11.4
 	github.com/gofrs/uuid v4.2.0+incompatible
 	github.com/prometheus/client_golang v1.12.2
 	github.com/sirupsen/logrus v1.8.1
@@ -53,6 +54,7 @@ require (
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/docker/cli v20.10.11+incompatible // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
 	github.com/docker/docker v20.10.14+incompatible // indirect
@@ -113,7 +115,6 @@ require (
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/mozillazg/go-httpheader v0.3.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
 	github.com/oracle/oci-go-sdk v24.3.0+incompatible // indirect
