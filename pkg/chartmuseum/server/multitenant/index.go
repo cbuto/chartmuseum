@@ -17,10 +17,13 @@ limitations under the License.
 package multitenant
 
 import (
+	"context"
 	"net/http"
 	pathutil "path"
 
+	"github.com/bsm/redislock"
 	cm_storage "github.com/chartmuseum/storage"
+
 	cm_logger "helm.sh/chartmuseum/pkg/chartmuseum/logger"
 	cm_repo "helm.sh/chartmuseum/pkg/repo"
 )
@@ -39,6 +42,18 @@ func (server *MultiTenantServer) getIndexFile(log cm_logger.LoggingFn, repo stri
 		return nil, &HTTPError{http.StatusInternalServerError, errStr}
 	}
 
+	externalCacheLock := &redislock.Lock{}
+	if server.ExternalCacheStore != nil {
+		externalCacheLock, err = server.ExternalCacheStore.Lock(entry.RepoCacheId.String())
+		if err != nil {
+			errStr := err.Error()
+			log(cm_logger.ErrorLevel, errStr,
+				"repo", repo,
+			)
+			return nil, &HTTPError{http.StatusInternalServerError, ""}
+		}
+		defer externalCacheLock.Release(context.Background())
+	}
 	entry.RepoLock.Lock()
 	defer entry.RepoLock.Unlock()
 	// if cache is nil, and not on a timer, regenerate it

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"context"
+	"time"
 
 	"github.com/bsm/redislock"
 	"github.com/go-redis/redis/v8"
@@ -63,4 +64,18 @@ func (store *RedisStore) Delete(key string) error {
 	// TODO: pass context in
 	err := store.Client.Del(context.Background(), key).Err()
 	return err
+}
+
+// Lock returns a lock on a key
+func (store *RedisStore) Lock(key string) (*redislock.Lock, error) {
+	// TODO: pass context in
+	// Retry every 100ms, for up-to 100x (10 seconds total)
+	backoff := redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 100)
+	lock, err := store.LockClient.Obtain(context.Background(), key, time.Second*30, &redislock.Options{
+		RetryStrategy: backoff,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return lock, nil
 }

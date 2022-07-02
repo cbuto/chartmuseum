@@ -40,6 +40,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bsm/redislock"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	cm_logger "helm.sh/chartmuseum/pkg/chartmuseum/logger"
@@ -54,9 +56,10 @@ import (
 type (
 	cacheEntry struct {
 		// cryptic JSON field names to minimize size saved in cache
-		RepoName  string         `json:"a"`
-		RepoIndex *cm_repo.Index `json:"b"`
-		RepoLock  sync.RWMutex
+		RepoName    string         `json:"a"`
+		RepoIndex   *cm_repo.Index `json:"b"`
+		RepoCacheId uuid.UUID      `json:"c"`
+		RepoLock    sync.RWMutex
 	}
 
 	memoryCacheStore struct {
@@ -367,9 +370,10 @@ func (server *MultiTenantServer) initCacheEntry(log cm_logger.LoggingFn, repo st
 		if err != nil {
 			repoIndex := server.newRepositoryIndex(log, repo)
 			entry = &cacheEntry{
-				RepoName:  repo,
-				RepoIndex: repoIndex,
-				RepoLock:  sync.RWMutex{},
+				RepoName:    repo,
+				RepoIndex:   repoIndex,
+				RepoLock:    sync.RWMutex{},
+				RepoCacheId: uuid.New(),
 			}
 			content, err = json.Marshal(entry)
 			if err != nil {
@@ -524,6 +528,14 @@ func (server *MultiTenantServer) startEventListener() {
 			continue
 		}
 
+		externalCacheLock := &redislock.Lock{}
+		if server.ExternalCacheStore != nil {
+			externalCacheLock, err = server.ExternalCacheStore.Lock(entry.RepoCacheId.String())
+			if err != nil {
+				log(cm_logger.ErrorLevel, "Error aquiring cache lock", zap.Error(err), zap.String("repo", repo))
+				continue
+			}
+		}
 		entry.RepoLock.Lock()
 		switch e.OpType {
 		case updateChart:
@@ -556,7 +568,13 @@ func (server *MultiTenantServer) startEventListener() {
 		}
 
 		entry.RepoLock.Unlock()
-
+		if server.ExternalCacheStore != nil {
+			err = externalCacheLock.Release(context.Background())
+			if err != nil {
+				log(cm_logger.ErrorLevel, "Error releasing cache lock", zap.Error(err), zap.String("repo", repo))
+				continue
+			}
+		}
 		log(cm_logger.DebugLevel, "Event handled successfully", zap.Any("event", e))
 	}
 }
@@ -594,6 +612,20 @@ func (server *MultiTenantServer) refreshCacheEntry(log cm_logger.LoggingFn, repo
 			"repo", repo,
 		)
 		return
+	}
+
+	var err error
+	externalCacheLock := &redislock.Lock{}
+	if server.ExternalCacheStore != nil {
+		externalCacheLock, err = server.ExternalCacheStore.Lock(entry.RepoCacheId.String())
+		if err != nil {
+			errStr := err.Error()
+			log(cm_logger.ErrorLevel, errStr,
+				"repo", repo,
+			)
+			return
+		}
+		defer externalCacheLock.Release(context.Background())
 	}
 	entry.RepoLock.Lock()
 	defer entry.RepoLock.Unlock()
