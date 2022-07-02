@@ -508,9 +508,6 @@ func (server *MultiTenantServer) startEventListener() {
 			log(cm_logger.ErrorLevel, "Error initializing cache entry", zap.Error(err), zap.String("repo", repo))
 			continue
 		}
-		entry.RepoLock.RLock()
-		index := entry.RepoIndex
-		entry.RepoLock.RUnlock()
 
 		server.TenantCacheKeyLock.Lock()
 		_, ok := server.Tenants[e.RepoName]
@@ -530,24 +527,22 @@ func (server *MultiTenantServer) startEventListener() {
 		entry.RepoLock.Lock()
 		switch e.OpType {
 		case updateChart:
-			index.UpdateEntry(e.ChartVersion)
+			entry.RepoIndex.UpdateEntry(e.ChartVersion)
 		case addChart:
-			index.AddEntry(e.ChartVersion)
+			entry.RepoIndex.AddEntry(e.ChartVersion)
 		case deleteChart:
-			index.RemoveEntry(e.ChartVersion)
+			entry.RepoIndex.RemoveEntry(e.ChartVersion)
 		default:
 			log(cm_logger.ErrorLevel, "Invalid operation type", zap.String("repo", repo),
 				"operation_type", e.OpType)
 			continue
 		}
 
-		err = index.Regenerate()
+		err = entry.RepoIndex.Regenerate()
 		if err != nil {
 			log(cm_logger.ErrorLevel, "Error regenerating index", zap.Error(err), zap.String("repo", repo))
 			continue
 		}
-		entry.RepoIndex = index
-		entry.RepoLock.Unlock()
 		err = server.saveCacheEntry(log, entry)
 		if err != nil {
 			log(cm_logger.ErrorLevel, "Error saving cache entry", zap.Error(err), zap.String("repo", repo))
@@ -559,6 +554,8 @@ func (server *MultiTenantServer) startEventListener() {
 			// It is not crucial if this does not succeed, we will just log any errors
 			go server.saveStatefile(log, e.RepoName, entry.RepoIndex.Raw)
 		}
+
+		entry.RepoLock.Unlock()
 
 		log(cm_logger.DebugLevel, "Event handled successfully", zap.Any("event", e))
 	}
