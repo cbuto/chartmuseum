@@ -34,9 +34,9 @@ import (
 	"helm.sh/chartmuseum/pkg/repo"
 
 	"github.com/chartmuseum/storage"
-	"sigs.k8s.io/yaml"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
+	"sigs.k8s.io/yaml"
 )
 
 var maxUploadSize = 1024 * 1024 * 20
@@ -1004,8 +1004,14 @@ func (suite *MultiTenantServerTestSuite) TestMetrics() {
 	suite.True(strings.Contains(metrics, "# TYPE chartmuseum_chart_versions_served_total gauge"))
 	suite.True(strings.Contains(metrics, "# TYPE chartmuseum_charts_served_total gauge"))
 
-	suite.True(strings.Contains(metrics, "chartmuseum_charts_served_total{repo=\"a\"} 1"))
-	suite.True(strings.Contains(metrics, "chartmuseum_chart_versions_served_total{repo=\"a\"} 2"))
+	// The metrics should eventually show up
+	suite.Eventually(func() bool {
+		return strings.Contains(metrics, "chartmuseum_charts_served_total{repo=\"a\"} 1")
+	}, 10*time.Second, time.Second)
+
+	suite.Eventually(func() bool {
+		return suite.True(strings.Contains(metrics, "chartmuseum_chart_versions_served_total{repo=\"a\"} 2"))
+	}, 10*time.Second, time.Second)
 
 	// Ensure that the b repo has no charts
 	suite.True(strings.Contains(metrics, "chartmuseum_chart_versions_served_total{repo=\"b\"} 0"))
